@@ -176,7 +176,7 @@ pip install -r requirements.txt
 ```
 
 ### 5. Configure Credentials
-```
+
 
 Edit `.env`:
 
