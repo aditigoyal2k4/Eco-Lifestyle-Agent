@@ -34,7 +34,6 @@ eco-lifestyle-agent/
 ├── app.py                          # Flask backend — routes, Watsonx chat, RAG integration
 ├── requirements.txt                # Python dependencies (6 packages)
 ├── .env                            # API credentials — NEVER commit this file
-├── .env.example                    # Environment template (safe to commit)
 ├── README.md                       # This file
 │
 ├── eco_knowledge/                  # RAG knowledge base — 10 markdown documents
@@ -177,9 +176,6 @@ pip install -r requirements.txt
 ```
 
 ### 5. Configure Credentials
-
-```bash
-cp .env.example .env
 ```
 
 Edit `.env`:
