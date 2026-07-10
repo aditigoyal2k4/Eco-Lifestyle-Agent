@@ -41,9 +41,11 @@ IBM_WATSONX_URL = _raw_url.replace(".dai.cloud.ibm.com", ".ml.cloud.ibm.com")
 IAM_TOKEN_URL  = "https://iam.cloud.ibm.com/identity/token"
 
 EMBED_MODEL      = "ibm/slate-125m-english-rtrvr-v2"   # 768-dim, available in au-syd
-EMBED_BATCH_SIZE = 16       # max texts per embedding API call
-CHUNK_SIZE       = 400      # target tokens (~words) per chunk
-CHUNK_OVERLAP    = 60       # overlap between consecutive chunks
+EMBED_BATCH_SIZE = 8        # max texts per embedding API call (conservative to avoid timeouts)
+EMBED_DELAY_S    = 0.5      # seconds between batch calls (rate limit: 2 req/s)
+MAX_TOKENS       = 480      # hard cap per chunk — Slate 125M limit is 512 tokens
+CHUNK_SIZE       = 300      # target words per chunk (well under 512-token limit)
+CHUNK_OVERLAP    = 40       # overlap between consecutive chunks
 TOP_K            = 3        # chunks returned per query
 
 KNOWLEDGE_DIR = Path(__file__).parent.parent / "eco_knowledge"
@@ -72,14 +74,21 @@ def _get_token() -> str:
 
 # ── Embedding ───────────────────────────────────────────────────────────────
 
+def _truncate(text: str, max_words: int = MAX_TOKENS) -> str:
+    """Truncate text to at most max_words words to stay within the model's token limit."""
+    words = text.split()
+    return " ".join(words[:max_words]) if len(words) > max_words else text
+
+
 def _embed_batch(texts: list[str]) -> list[list[float]]:
     """Call IBM Watsonx text/embeddings for a batch of texts."""
     token = _get_token()
     url   = f"{IBM_WATSONX_URL}/ml/v1/text/embeddings?version=2024-05-31"
+    safe_texts = [_truncate(t) for t in texts]
     payload = {
         "model_id":   EMBED_MODEL,
         "project_id": IBM_PROJECT_ID,
-        "inputs":     texts,
+        "inputs":     safe_texts,
     }
     r = requests.post(
         url,
@@ -87,16 +96,23 @@ def _embed_batch(texts: list[str]) -> list[list[float]]:
         json=payload,
         timeout=60,
     )
-    r.raise_for_status()
+    if not r.ok:
+        raise requests.HTTPError(
+            f"{r.status_code} — {r.json().get('errors', [{}])[0].get('message', r.text)}",
+            response=r,
+        )
     return [item["embedding"] for item in r.json()["results"]]
 
 
 def embed_texts(texts: list[str]) -> list[list[float]]:
-    """Embed a list of texts in batches, respecting EMBED_BATCH_SIZE."""
+    """Embed a list of texts in batches, respecting EMBED_BATCH_SIZE and rate limits."""
+    import time
     all_embeddings = []
     for i in range(0, len(texts), EMBED_BATCH_SIZE):
         batch = texts[i : i + EMBED_BATCH_SIZE]
         all_embeddings.extend(_embed_batch(batch))
+        if i + EMBED_BATCH_SIZE < len(texts):
+            time.sleep(EMBED_DELAY_S)   # respect 2 req/s rate limit
     return all_embeddings
 
 
